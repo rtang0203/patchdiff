@@ -1,0 +1,6 @@
+BeginDate,EndDate,Issuer,Sector,Industry,Country,Conviction,Analyst
+,,JBL,Computers,,USA,,
+,,PIPR,Consumer Discretionary,,USA,High,
+,,FR,,,USA,,
+20240201,,FR,,,FRA,Low,Sally
+20240301,,IBM,,,,Low,
