@@ -52,12 +52,15 @@ validation, columns, matching, field classification and rendering.
 
 | File | Responsibility |
 | --- | --- |
+| `patchdiff/__init__.py` | Public Python API |
 | `patchdiff/model.py` | `Scope`, `PatchRow`, `Patch`, and the diff result types |
 | `patchdiff/parser.py` | CSV reading, normalization, validation |
 | `patchdiff/differ.py` | Column comparison, row matching, overlap detection |
 | `patchdiff/render.py` | Formatting a `PatchDiff` as text |
 | `patchdiff/cli.py` | Argument parsing and exit codes |
-| `DIFF_SPEC.md` | Precise statement of every rule the diff follows |
+| `patchdiff/__main__.py` | `python -m patchdiff` entry point |
+| `tests/` | Test suite and sample CSV fixtures |
+| `docs/DIFF_SPEC.md` | Precise statement of every rule the diff follows |
 
 The differ never formats a string and the renderer never computes a difference.
 Adding a machine-readable output format means writing a second renderer against
@@ -110,7 +113,7 @@ I group rows by **key alone** and match within each group in four stages of
 decreasing confidence — exact, same time window, same values, then anything —
 pairing greedily by number of differing fields, with ties broken on line number.
 Unmatched old rows are removals; unmatched new rows are additions. The full
-algorithm is in `DIFF_SPEC.md` section 5.
+algorithm is in `docs/DIFF_SPEC.md` section 5.
 
 Three decisions inside that are worth calling out:
 
