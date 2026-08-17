@@ -3,6 +3,18 @@
 Generates a human-readable diff between two patch CSVs, describing how the
 application of the patch changes.
 
+The central model is:
+ ▏ A patch row is a rule: for key K, during time scope S, set fields V.
+
+ Therefore it compares patch semantics rather than CSV text:
+
+ - Row and column reordering are ignored.
+ - Blank value cells mean “leave the existing system value unchanged,” not “set it to
+  empty.”
+ - Added or removed columns are reported once rather than as changes to every row.
+ - Date-scope edits are treated as modifications to a rule where possible.
+ - Duplicate keys are supported through similarity-based row matching. 
+
 ## Requirements
 
 Python 3.9+. No third-party dependencies. `pytest` is needed only for the tests.
