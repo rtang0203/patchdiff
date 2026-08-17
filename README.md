@@ -46,21 +46,6 @@ Removed rows
       Was setting Country to FRA
 ```
 
-## Layout
-
-| File | Responsibility |
-| --- | --- |
-| `patchdiff/model.py` | `Scope`, `PatchRow`, `Patch`, and the diff result types |
-| `patchdiff/parser.py` | CSV reading, normalization, validation |
-| `patchdiff/differ.py` | Column comparison and row matching |
-| `patchdiff/render.py` | Formatting a `PatchDiff` as text |
-| `patchdiff/cli.py` | Argument parsing and exit codes |
-| `docs/DIFF_SPEC.md` | Precise statement of every rule the diff follows |
-
-The file arrangement is designed for modularity. differ.py produces a PatchDiff object, which could easily be rendered into a JSON/YAML/other machine readable format by a different renderer.
-
----
-
 # My Thought Process/Editorial:
 
 I started with the idea of a standard git style line number based diff. Display a summary:
