@@ -6,3 +6,4 @@
 - 2026-08-16: Updated field-change documentation and tests to say “previously not set” and “no longer sets,” matching the clearer renderer terminology.
 - 2026-08-16: Standardized mutable model collections on lists (`Patch.value_columns`, `Patch.rows`, and `RowModification.field_changes`); kept tuples only for fixed internal constants and unchanged row pairs.
 - 2026-08-16: Removed redundant `PatchDiff.key_column` and corrected stale README date-format and specification-path documentation.
+- 2026-08-16: Added rendering coverage proving populated added-column usage lists stop at 20 entries and report the remaining count.

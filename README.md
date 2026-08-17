@@ -202,7 +202,7 @@ pip install pytest
 python -m pytest
 ```
 
-99 tests. `tests/test_sample_patches.py` asserts end-to-end expectations for
+100 tests. `tests/test_sample_patches.py` asserts end-to-end expectations for
 the provided sample progression; the other modules cover parsing, validation,
 columns, matching, field classification and rendering.
 

@@ -159,6 +159,23 @@ def test_long_sections_truncate(tmp_path):
     assert "50" in out, "the summary still reports the true total"
 
 
+def test_added_column_usage_truncates_after_twenty_rows(tmp_path):
+    old = (
+        "BeginDate,EndDate,Issuer,Country\n"
+        + "".join(f",,K{i:03d},USA\n" for i in range(50))
+    )
+    new = (
+        "BeginDate,EndDate,Issuer,Country,Analyst\n"
+        + "".join(f",,K{i:03d},USA,A{i:03d}\n" for i in range(50))
+    )
+    out = render(diff_text(tmp_path, old, new))
+
+    assert out.count("Sets Analyst to") == 20
+    assert "Sets Analyst to A019" in out
+    assert "Sets Analyst to A020" not in out
+    assert "... and 30 more" in out
+
+
 # --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
