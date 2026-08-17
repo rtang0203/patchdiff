@@ -5,7 +5,7 @@ application of the patch changes.
 
 The central model is:
 
-*A patch row is a rule: for key K, during time scope S, set fields V.*
+**A patch row is a rule: for key K, during time scope S, set fields V.**
 
  Therefore it compares patch semantics rather than CSV text:
 
@@ -57,47 +57,35 @@ Removed rows
 | `patchdiff/cli.py` | Argument parsing and exit codes |
 | `docs/DIFF_SPEC.md` | Precise statement of every rule the diff follows |
 
-
 The file arrangement is designed for modularity. differ.py produces a PatchDiff object, which could easily be rendered into a JSON/YAML/other machine readable format by a different renderer.
+
 ---
 
 # My Thought Process/Editorial:
 
 I started with the idea of a standard git style line number based diff. Display a summary:
-'''
+```
 - X columns added (columns A, B, ...)
 - Y columns removed (columns C, ...)
 - X rows added
 - Y rows removed
 - Z rows modified
-'''
+```
 
 And then display a diff for each row added/removed/modified:
-'''
+```
 - Added row: a/b/c... (line N)
 - Removed row: a/b/c/... (line M)
 - Modified row: .../d/.../e/... (line L)
-'''
+```
 
 Then I thought about what happens if we reorder rows, ex. from rows A/B/C to B/A/C? then the diff would be: - row A (line 1), + row A (line 2). Seems clunky...
 
-According to the instructions, the goal of this exercise is to "print out a human readable diff explaining how the application of the patch would change from the original patch to the new patch." "Application of the patch" sounds like the key phrase here; reordering rows would not change the application of the patch, therefore it should not produce a diff. Additionally, the instructions also state that reordering columns should not produce a diff. These lead me to my first main assumption: *reordering rows should not produce a diff.*
+According to the instructions, the goal of this exercise is to "print out a human readable diff explaining how the application of the patch would change from the original patch to the new patch." "Application of the patch" sounds like the key phrase here; reordering rows would not change the application of the patch, therefore it should not produce a diff. Additionally, the instructions also state that reordering columns should not produce a diff. These lead me to my first main assumption: **reordering rows should not produce a diff.**
 
 So then if rows aren't identified by line number, then they must be identified by key. This assumption is supported by the instructions explicitly stating how to determine a key column for a patch, and that if the key columns of 2 patches don't match, the diff should error out. So let's match rows by their key. Okay then what happens when there are multiple rows with the same key? Like what if there are 2 rows with key PIPR in patch 3 and 1 row with key PIPR in patch 4? Is this 2 deleted rows and 1 added row? Or 1 modified row and 1 deleted row? And if it's a modified row then how do we determine which of the 2 old rows matches the single new row? Do we match same key rows across patches by line number? Or some sort of similarity between values? 
 
-This duplicate key matching rows problem was the most interesting part of the assignment. I went through multiple iterations of matching logic and eventually settled on this algorithm: 1. Pair off exact matches first (all values in both rows identical), then 2. Pair off rows with same begin/end date but maybe different value fields, then 3. Pair off rows with same value fields but different begin/end date, then 4. Pair off the rest. Within tiers, we pair rows greedily by number of differing fields, with ties broken on line number. Afterwards, any unpaired rows from the old patch are removals; unpaired rows from the new patch are adds. The exact logic is detailed later on in "How the diff is created" section, as well as in docs/DIFF_SPEC.md.
-
-## LLM Use/Points of Disagreement
-
-I utilized AI assistance in implementing this program and especially with writing the test suite. However I want to make it clear that I very much thought through and weighed the options on every detail of the design, implementation, and output format.
-
-Specific decisions where I disagreed with the LLM's decisions and manually corrected:
-- Rejected using (keyColumn, beginDate, endDate) as composite key in favor of single keyColumn and a set of rules to match rows across patches. I made this decision because I noticed in the sample patches there can be multiple rows with same key column and begin/end dates.
-- In models.py, the LLM implementation originally set the Patch.rows and RowModification.field_changes field types as tuples instead of lists. I assume this was in order to make these dataclasses hashable. I decided to change them to lists because IMO this data just makes more sense in list form, and we never hash Patch or RowModification objects anyway.
-- Also in models.py, the LLM implementation originally created separate dataclasses for RowAddition and RowRemoval. I removed them because they were just wrappers over PatchRow; there wasn't any point to them and they just bloated the code.
-- The LLM implementation originally included a Warnings section at the bottom of the output diff, displaying a warning when two rows had the same key but overlapping begin/end dates. I removed this feature because 1. I felt it made too many assumptions about the underlying patch system, and 2. having 2 rows with the same date range makes sense to me if they have different Country or Analyst or whatever.
-- Manually customized specific wording and formatting inside render.py to make the output more clear and human readable. 
-- In the matching logic, the LLM implementation originally suggested a "threshold" value (originally half) where if more than this number of value fields differ between an old and a new row, then we would never count it as a modification and instead always count it as deleted row + added row. I decided against this because I felt it introduced unnecessary complexity, and any threshold value would have been arbitrary.
+This duplicate key matching rows problem was the most interesting part of the assignment. I went through multiple iterations of matching logic and eventually settled on this algorithm: 1. Pair off exact matches first (all values in both rows identical), then 2. Pair off rows with same begin/end date but maybe different value fields, then 3. Pair off rows with same value fields but different begin/end date, then 4. Pair off the rest. Within tiers, we pair rows greedily by number of differing fields, with ties broken on line number. Afterwards, any unpaired rows from the old patch are removals; unpaired rows from the new patch are adds. The exact logic is detailed in docs/DIFF_SPEC.md.
 
 # How the diff is created
 
@@ -128,36 +116,6 @@ No longer sets Country (previously set to USA)      value -> blank
 ```
 
 The third is usually the most consequential edit a reviewer can miss.
-
-## Matching rows when keys are not unique
-
-This is the tricky part of the problem. `Patch1` contains two `PIPR` rows with identical (blank) date ranges, so `(key, BeginDate, EndDate)` is not a unique identifier. `Patch3 -> Patch4` collapses two `PIPR` rows into one.
-
-I group rows by **key alone** and match within each group in four stages of
-decreasing confidence — exact, same time window, same values, then anything —
-pairing greedily by number of differing fields, with ties broken on line number.
-Unmatched old rows are removals; unmatched new rows are additions. The full
-algorithm is in `docs/DIFF_SPEC.md` section 5.
-
-Three key decisions:
-
-**Not ordinal position within the group.** Pairing the first old `PIPR` with the
-first new `PIPR` is simpler, but it reintroduces exactly the order-dependence I
-had just argued was meaningless: swapping two rows would report two
-modifications for an unchanged patch. Similarity-based matching keeps the
-behaviour consistent with the framing.
-
-**Time window is not part of row identity.** Grouping on `(key, begin, end)`
-would report an edit to a row's end date as a deletion plus an unrelated
-insertion, which is technically true and reads badly. Grouping on key alone lets
-stage 3 recognise it as a scope change to an existing rule.
-
-**No distance threshold.** I considered only calling something "modified" if
-one field changed, or fewer than half. Both add a tuning knob for a case that
-barely arises: the threshold only matters when a group has two or more unmatched
-rows on *both* sides, which none of the sample data does. A 1-vs-1 group is
-always a modification, however many fields changed, because "modified" and
-"removed + added" carry identical information there and the former reads better.
 
 ## Columns
 
@@ -237,6 +195,20 @@ error the user can act on is the better answer.
   countries or two analysts is not a contradiction — so the tool reports the
   diff and leaves interpretation to the reader.
 
+## Layout
+
+| File | Responsibility |
+| --- | --- |
+| `patchdiff/model.py` | `Scope`, `PatchRow`, `Patch`, and the diff result types |
+| `patchdiff/parser.py` | CSV reading, normalization, validation |
+| `patchdiff/differ.py` | Column comparison and row matching |
+| `patchdiff/render.py` | Formatting a `PatchDiff` as text |
+| `patchdiff/cli.py` | Argument parsing and exit codes |
+| `docs/DIFF_SPEC.md` | Precise statement of every rule the diff follows |
+
+The file arrangement is designed for modularity. differ.py produces a PatchDiff object, which could easily be rendered into a JSON/YAML/other machine readable format by a different renderer.
+
+---
 
 ## Tests
 
@@ -248,3 +220,14 @@ python -m pytest
 99 tests. `tests/test_sample_patches.py` asserts end-to-end expectations for
 the provided sample progression; the other modules cover parsing, validation,
 columns, matching, field classification and rendering.
+
+## LLM Use/Points of Disagreement
+
+I utilized AI assistance in implementing this program and especially with writing the test suite. However I want to make it clear that I very much thought through and weighed the options on every detail of the design, implementation, and output format.
+
+Specific decisions where I disagreed with the LLM's decisions and manually overrode:
+- Rejected using (keyColumn, beginDate, endDate) as composite key in favor of single keyColumn and a set of rules to match rows across patches. I made this decision because I noticed in the sample patches there can be multiple rows with same key column and begin/end dates.
+- In models.py, the LLM implementation originally set the Patch.rows and RowModification.field_changes field types as tuples instead of lists. I assume this was in order to make these dataclasses hashable. I decided to change them to lists because IMO this data just makes more sense in list form, and we never hash Patch or RowModification objects anyway.
+- Also in models.py, the LLM implementation originally created separate dataclasses for RowAddition and RowRemoval. I removed them because they were just wrappers over PatchRow; there wasn't any point to them and they just bloated the code.
+- The LLM implementation originally included a Warnings section at the bottom of the output diff, displaying a warning when two rows had the same key but overlapping begin/end dates. I removed this feature because 1. I felt it made too many assumptions about the underlying patch system, and 2. having 2 rows with the same date range makes sense to me if they have different Country or Analyst or whatever.
+- In the matching logic, the LLM implementation originally suggested a "threshold" value (originally half) where if more than this number of value fields differ between an old and a new row, then we would never count it as a modification and instead always count it as deleted row + added row. I decided against this because I felt it introduced unnecessary complexity, and any threshold value would have been arbitrary.
