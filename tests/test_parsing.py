@@ -1,13 +1,14 @@
-"""Parsing and normalization — DIFF_SPEC section 1.
+"""CSV parsing and supported input normalization.
 
-The theme of this module: two files that differ only in *encoding* should
-produce no diff. Every test here is a way a file can look different on disk
-while describing the same patch.
+The parser handles the encodings and date formats used by the supplied
+Excel/CSV examples, but otherwise preserves values and rejects malformed input.
 """
 
 import datetime as dt
 
-from conftest import diff_text, load_patch, write_csv, write_raw
+import pytest
+
+from conftest import PatchError, diff_text, load_patch, write_csv, write_raw
 
 
 # --------------------------------------------------------------------------
@@ -101,22 +102,25 @@ def test_utf8_bom_does_not_corrupt_first_header(tmp_path):
     assert diff_patches(old, new).has_differences is False
 
 
-def test_header_whitespace_is_stripped(tmp_path):
-    old = write_raw(tmp_path, "old.csv",
-                    "BeginDate,EndDate,Issuer,Country\n,,JBL,USA\n")
-    new = write_raw(tmp_path, "new.csv",
-                    "BeginDate , EndDate ,Issuer , Country \n,,JBL,USA\n")
-    from conftest import diff_patches
-    assert diff_patches(load_patch(old), load_patch(new)).has_differences is False
+def test_header_whitespace_is_not_repaired(tmp_path):
+    path = write_raw(
+        tmp_path,
+        "p.csv",
+        "BeginDate ,EndDate,Issuer,Country\n,,JBL,USA\n",
+    )
+    with pytest.raises(PatchError, match="BeginDate"):
+        load_patch(path)
 
 
-def test_cell_whitespace_is_stripped(tmp_path):
-    old = write_raw(tmp_path, "old.csv",
-                    "BeginDate,EndDate,Issuer,Country\n,,JBL,USA\n")
-    new = write_raw(tmp_path, "new.csv",
-                    "BeginDate,EndDate,Issuer,Country\n,, JBL , USA \n")
-    from conftest import diff_patches
-    assert diff_patches(load_patch(old), load_patch(new)).has_differences is False
+def test_cell_whitespace_is_preserved(tmp_path):
+    path = write_raw(
+        tmp_path,
+        "p.csv",
+        "BeginDate,EndDate,Issuer,Country\n,, JBL , USA \n",
+    )
+    patch = load_patch(path)
+    assert patch.rows[0].key == " JBL "
+    assert patch.rows[0].values["Country"] == " USA "
 
 
 def test_trailing_blank_lines_are_skipped(tmp_path):
@@ -128,10 +132,13 @@ def test_trailing_blank_lines_are_skipped(tmp_path):
     assert len(p.rows) == 1
 
 
-def test_all_blank_row_is_skipped(tmp_path):
-    p = load_patch(write_raw(
-        tmp_path, "p.csv",
-        "BeginDate,EndDate,Issuer,Country\n,,JBL,USA\n,,,\n"))
-    assert len(p.rows) == 1
+def test_all_blank_csv_record_errors(tmp_path):
+    path = write_raw(
+        tmp_path,
+        "p.csv",
+        "BeginDate,EndDate,Issuer,Country\n,,JBL,USA\n,,,\n",
+    )
+    with pytest.raises(PatchError, match="blank Issuer"):
+        load_patch(path)
 
 

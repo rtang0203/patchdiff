@@ -208,3 +208,14 @@ def test_exit_two_on_error(tmp_path):
 def test_exit_two_on_missing_file(tmp_path):
     r = _run(str(FIXTURES / "Patch0.csv"), str(tmp_path / "nope.csv"))
     assert r.returncode == 2
+
+
+def test_exit_two_without_traceback_on_invalid_utf8(tmp_path):
+    bad = tmp_path / "bad.csv"
+    bad.write_bytes(b"BeginDate,EndDate,Issuer,Country\n,,JBL,\xff\n")
+
+    r = _run(str(FIXTURES / "Patch0.csv"), str(bad))
+
+    assert r.returncode == 2
+    assert r.stderr.startswith("error:")
+    assert "Traceback" not in r.stderr

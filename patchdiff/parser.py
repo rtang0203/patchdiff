@@ -1,8 +1,8 @@
 """Reading patch CSVs into the model.
 
-Normalizes what can differ between two files describing the same patch --
-BOM, whitespace, date format -- and errors on anything else it cannot
-interpret, rather than guessing. After this layer, comparison is naive.
+Handles the encoding and date formats used by the supplied Excel/CSV examples,
+then rejects input it cannot interpret rather than repairing it. After this
+layer, comparison is naive.
 """
 
 import csv
@@ -30,7 +30,7 @@ def load_patch(path) -> Patch:
 
 
 def _read(path):
-    """Return (header, [(line_number, cells)]) with every cell stripped.
+    """Return (header, [(line_number, cells)]), preserving cell contents.
 
     utf-8-sig matters: Excel writes a BOM, and without stripping it the first
     header becomes '\\ufeffBeginDate', so two identical files report every
@@ -38,15 +38,14 @@ def _read(path):
     """
     try:
         with open(path, newline="", encoding="utf-8-sig") as fh:
-            reader = csv.reader(fh)
-            records = [(reader.line_num, [c.strip() for c in cells])
-                       for cells in reader]
-    except OSError as exc:
+            reader = csv.reader(fh, strict=True)
+            records = [(reader.line_num, cells) for cells in reader]
+    except (OSError, UnicodeError, csv.Error) as exc:
         raise PatchError(f"cannot read {path}: {exc}") from exc
 
-    # Wholly-empty records are dropped: csv.reader yields [] for the trailing
-    # newline that essentially every CSV ends with.
-    records = [(n, cells) for n, cells in records if any(cells)]
+    # A physical blank line is not a patch row. A comma-filled record is kept
+    # and rejected below as a row with a blank key.
+    records = [(n, cells) for n, cells in records if cells]
     if not records:
         raise PatchError(f"{path} is empty")
 
@@ -64,9 +63,17 @@ def _validate_header(header, path):
                          f"column, found {header}")
     if not all(header):
         raise PatchError(f"{path}: blank column name in header {header}")
+    padded = [c for c in header if c != c.strip()]
+    if padded:
+        raise PatchError(
+            f"{path}: column name(s) contain surrounding whitespace {padded}"
+        )
     duplicates = sorted({c for c in header if header.count(c) > 1})
     if duplicates:
         raise PatchError(f"{path}: duplicate column name(s) {duplicates}")
+    missing = [c for c in WELL_KNOWN_COLUMNS if c not in header]
+    if missing:
+        raise PatchError(f"{path}: missing required column(s) {missing}")
 
 
 def _classify(header, path):
@@ -90,7 +97,7 @@ def _classify(header, path):
 
 def _build_row(cells, line_no, index, key_column, value_columns, path):
     key = cells[index[key_column]]
-    if not key:
+    if not key.strip():
         raise PatchError(f"{path} line {line_no}: blank {key_column}")
     scope = Scope(begin=_parse_date(cells, index, "BeginDate", line_no, path),
                   end=_parse_date(cells, index, "EndDate", line_no, path))
@@ -99,8 +106,6 @@ def _build_row(cells, line_no, index, key_column, value_columns, path):
 
 
 def _parse_date(cells, index, column, line_no, path):
-    if column not in index:
-        return None          # missing date columns are out of scope, not an error
     raw = cells[index[column]]
     if not raw:
         return None

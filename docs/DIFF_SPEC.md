@@ -27,10 +27,11 @@ is never reported as a difference.
 Applied to both files before anything is compared.
 
 1. Read with `encoding="utf-8-sig"` so an Excel-written BOM does not corrupt the
-   first header cell.
-2. `strip()` every header name and every cell value.
-3. Skip rows that are wholly empty (the `csv` module yields `[]` or all-blank
-   lists for stray trailing newlines).
+   first header cell. CSV parsing is strict.
+2. Preserve cell contents exactly. Header names with surrounding whitespace are
+   rejected rather than silently repaired.
+3. Skip physical blank lines, which `csv.reader` yields as `[]`. A comma-filled
+   record is a patch row and proceeds to validation.
 4. Record the original 1-based file line number on every row. This is metadata:
    it is used for output and for deterministic tie-breaking, and is **never**
    part of an equality comparison.
@@ -41,8 +42,8 @@ Anything else the file might contain is **rejected rather than repaired** — se
 section 2. Guessing at malformed input hides real problems and adds code that
 earns nothing.
 
-Two files that differ only in BOM, whitespace, date format, row order, or
-column order produce **no diff**.
+Two files that differ only in BOM, accepted date format, row order, or column
+order produce **no diff**.
 
 ---
 
@@ -52,20 +53,21 @@ Errors abort with a message and a non-zero exit code.
 
 | Condition | Result |
 | --- | --- |
-| Duplicate column names (after strip) in either file | **Error** |
+| Duplicate column names in either file | **Error** |
+| A column name with surrounding whitespace | **Error** |
 | A blank column name (Excel emits unnamed trailing columns) | **Error** |
 | A row with more or fewer cells than the header | **Error** |
 | Key column name differs between the two files | **Error** |
 | A row has a blank key cell | **Error** |
 | A non-blank date cell cannot be parsed, including two-digit years | **Error** |
 | Fewer than 3 columns (no room for dates + key) | **Error** |
-| `BeginDate`/`EndDate` absent | Not validated — out of scope |
+| `BeginDate` or `EndDate` absent | **Error** |
 
 The key column is computed **positionally in each file independently**, then the
-two names are compared. A consequence worth documenting for users: reordering
-columns such that a *different* non-date column lands first will error even
-though the content is unchanged. That falls out of the positional rule in the
-assignment; it is accepted rather than worked around.
+two names are compared. This follows the assignment's rule that the key is the
+first non-`BeginDate`/non-`EndDate` column and that a different adjusted key is
+an error. Date columns and value columns may move without a diff as long as the
+same key remains the first non-date column.
 
 ---
 
@@ -79,10 +81,10 @@ Column order is not part of identity. Columns are compared as **sets** of names.
 
 Rules:
 
-1. Added and removed columns are reported **once**, in their own section — never
-   as a per-row change. A column added across 200 rows is one change, not 200.
-2. Added and removed columns are **excluded from all row-level comparison**.
-   Only shared value columns participate in matching and field diffs.
+1. Added and removed columns are reported in their own section and are never
+   rendered as field changes on matched rows.
+2. Added and removed columns are **excluded from row matching and modification
+   field diffs**. Only shared value columns participate.
 3. For an added column, enumerate the rows where it is populated, with the value.
    For a removed column, enumerate where it *was* populated.
 4. If the column is blank in every row, report the column change and state that

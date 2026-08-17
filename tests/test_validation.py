@@ -13,8 +13,8 @@ def test_duplicate_column_names_error(tmp_path):
         """))
 
 
-def test_duplicate_column_names_after_stripping_error(tmp_path):
-    """'Country ' and 'Country' collide once normalized."""
+def test_column_name_with_surrounding_whitespace_errors(tmp_path):
+    """Header names must match exactly rather than being silently repaired."""
     with pytest.raises(PatchError):
         load_patch(write_raw(
             tmp_path, "p.csv",
@@ -31,8 +31,7 @@ def test_blank_key_cell_errors(tmp_path):
 
 
 def test_whitespace_only_key_cell_errors(tmp_path):
-    """Blank after stripping is still blank — but the row is not *wholly*
-    empty, so it must not be silently skipped either."""
+    """A required key containing only whitespace is still blank."""
     with pytest.raises(PatchError):
         load_patch(write_raw(
             tmp_path, "p.csv",
@@ -45,6 +44,36 @@ def test_unparseable_date_errors(tmp_path):
             BeginDate,EndDate,Issuer,Country
             not-a-date,,JBL,USA
         """))
+
+
+@pytest.mark.parametrize(
+    ("header", "row", "missing"),
+    [
+        ("EndDate,Issuer,Country", ",JBL,USA", "BeginDate"),
+        ("BeginDate,Issuer,Country", ",JBL,USA", "EndDate"),
+    ],
+)
+def test_missing_required_date_column_errors(tmp_path, header, row, missing):
+    path = write_raw(tmp_path, "p.csv", f"{header}\n{row}\n")
+    with pytest.raises(PatchError, match=missing):
+        load_patch(path)
+
+
+def test_malformed_csv_errors(tmp_path):
+    path = write_raw(
+        tmp_path,
+        "p.csv",
+        'BeginDate,EndDate,Issuer,Country\n,,JBL,"USA\n',
+    )
+    with pytest.raises(PatchError, match="cannot read"):
+        load_patch(path)
+
+
+def test_invalid_utf8_errors(tmp_path):
+    path = tmp_path / "p.csv"
+    path.write_bytes(b"BeginDate,EndDate,Issuer,Country\n,,JBL,\xff\n")
+    with pytest.raises(PatchError, match="cannot read"):
+        load_patch(path)
 
 
 def test_too_few_columns_errors(tmp_path):

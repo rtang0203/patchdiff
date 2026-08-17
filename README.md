@@ -46,7 +46,7 @@ Removed rows
       Was setting Country to FRA
 ```
 
-# My Thought Process/Editorial:
+### My Thought Process/Editorial:
 
 I started with the idea of a standard git style line number based diff. Display a summary:
 ```
@@ -68,7 +68,7 @@ Then I thought about what happens if we reorder rows, ex. from rows A/B/C to B/A
 
 According to the instructions, the goal of this exercise is to "print out a human readable diff explaining how the application of the patch would change from the original patch to the new patch." "Application of the patch" sounds like the key phrase here; reordering rows would not change the application of the patch, therefore it should not produce a diff. Additionally, the instructions also state that reordering columns should not produce a diff. These lead me to my first main assumption: **reordering rows should not produce a diff.**
 
-So then if rows aren't identified by line number, then they must be identified by key. This assumption is supported by the instructions explicitly stating how to determine a key column for a patch, and that if the key columns of 2 patches don't match, the diff should error out. So let's match rows by their key. Okay then what happens when there are multiple rows with the same key? Like what if there are 2 rows with key PIPR in patch 3 and 1 row with key PIPR in patch 4? Is this 2 deleted rows and 1 added row? Or 1 modified row and 1 deleted row? And if it's a modified row then how do we determine which of the 2 old rows matches the single new row? Do we match same key rows across patches by line number? Or some sort of similarity between values? 
+So if rows aren't identified by line number, then they must be identified by key. This assumption is supported by the instructions explicitly stating how to determine a key column for a patch, and that if the key columns of 2 patches don't match, the diff should error out. So let's match rows by their key. Okay, then what happens when there are multiple rows with the same key? Like what if there are 2 rows with key PIPR in patch 3 and 1 row with key PIPR in patch 4? Is this 2 deleted rows and 1 added row? Or 1 modified row and 1 deleted row? And if it's a modified row then how do we determine which of the 2 old rows matches the single new row? Do we match same key rows across patches by line number? Or some sort of similarity between values? 
 
 This duplicate key matching rows problem was the most interesting part of the assignment. I went through multiple iterations of matching logic and eventually settled on this algorithm: 1. Pair off exact matches first (all values in both rows identical), then 2. Pair off rows with same begin/end date but maybe different value fields, then 3. Pair off rows with same value fields but different begin/end date, then 4. Pair off the rest. Within tiers, we pair rows greedily by number of differing fields, with ties broken on line number. Afterwards, any unpaired rows from the old patch are removals; unpaired rows from the new patch are adds. The exact logic is detailed in docs/DIFF_SPEC.md.
 
@@ -107,8 +107,9 @@ The third is usually the most consequential edit a reviewer can miss.
 Column identity is set-based, so reordering produces no diff, as the assignment
 requires.
 
-A column present on only one side is reported **once**, in its own section, and
-excluded from row comparison entirely. The column section lists which rows the column touches:
+A column present on only one side is reported in its own section and excluded
+from row matching and field-level modifications. The column section lists which
+rows the column touches:
 
 ```
 Column changes
@@ -116,7 +117,8 @@ Column changes
       Sets Analyst to Bob for FR — from 2024-02-01
 ```
 
-Added/removed columns are excluded from row comparison so that we do not produce a row diff for every row in the patch when we add/remove a column.
+Added/removed rows still list all of their populated values, including values
+in added/removed columns, so each row description remains self-contained.
 
 ---
 
@@ -127,8 +129,8 @@ Added/removed columns are excluded from row comparison so that we do not produce
 - Row order does not affect how a patch applies. If the real system applies rows
   in order so later rows shadow earlier ones, the reordering rule above is
   wrong.
-- Value comparison is whitespace-insensitive and case-**sensitive**. `bob` and
-  `Bob` are different values as far as the system applying the patch is
+- Value comparison preserves whitespace and is case-sensitive. `bob`, `Bob`,
+  and ` Bob ` are different values as far as the system applying the patch is
   concerned.
 - Dates are parsed from `YYYYMMDD`, `M/D/YYYY`, and `YYYY-MM-DD`, and always
   rendered as `YYYY-MM-DD`. Ambiguous day-first dates may be interpreted as
@@ -136,49 +138,42 @@ Added/removed columns are excluded from row comparison so that we do not produce
 - `BeginDate`/`EndDate` are treated as inclusive on both ends, per the
   assignment's description of `EndDate`.
 
-**Normalized, because two files describing the same patch must not differ**
+**Normalized, because these files still describe the same patch**
 
 - UTF-8 BOM. Without `utf-8-sig`, the first header becomes `\ufeffBeginDate`
   and two identical Excel-saved files report every column as removed and
   re-added — a wrong answer, not a missing edge case.
-- Header and cell whitespace.
-- Blank trailing lines, which `csv.reader` yields as `[]` and which nearly
-  every CSV ends with.
+- Physical blank lines, which `csv.reader` yields as `[]` and which do not
+  contain a patch row.
 
 **Rejected rather than repaired**
 
-Blank column names, rows whose cell count does not match the header, and dates
-outside the three accepted formats all raise an error naming the file and line.
-Excel does emit unnamed trailing columns and ragged rows, and both could be
-silently cleaned up, but guessing at malformed input hides real problems. An
-error the user can act on is the better answer.
+Cell contents are preserved exactly. Header names with surrounding whitespace,
+missing required columns, blank or duplicate column names, malformed CSV/UTF-8,
+rows whose cell count does not match the header, and dates outside the three
+accepted formats all raise an actionable error. Guessing at malformed input
+would hide data problems.
 
 **Known limitations**
 
-- **The positional key rule can error on identical content.** The key column is
-  "the first column that is not BeginDate/EndDate", so reordering columns such
-  that a different column lands in that position changes the detected key and
-  raises an error, even though the assignment says reordering should not produce
-  a diff. 
-- **Missing `BeginDate`/`EndDate` columns are not validated.** Such a patch
-  parses with every row unscoped rather than erroring.
-- **Greedy pairing is not guaranteed symmetric.** In a group with several
-  unmatched rows on both sides and distance ties, diffing A against B and B
-  against A can pair rows differently. Optimal assignment would fix it; the
-  case does not arise in the sample data and I judged the complexity not worth
-  it. 
+- **Key identification is positional.** I interpret the assignment's two rules
+  together: the key is the first non-`BeginDate`/non-`EndDate` column, and the
+  adjusted key must be the same as the original. Date and value columns may move
+  without a diff as long as the same key remains the first non-date column;
+  promoting a different value column to that position is a key change and
+  raises an error.
+- **Greedy pairing is not globally optimal or guaranteed symmetric.** In a
+  many-to-many group, an optimal assignment could sometimes report fewer total
+  field changes. I kept the staged greedy matcher because it is small,
+  explainable, deterministic for a given input, and handles the supplied data.
+  A globally optimal matcher would add substantial complexity for ambiguous
+  rows that have no intrinsic identity in the file format.
 - **A merge of two rows into one reads as a modification plus a removal.** In
   `Patch3 -> Patch4` a user merged two `PIPR` rows; the tool reports the net
   effect accurately but does not name it as a merge, which would require
   guessing intent.
 - **Two-digit years are rejected rather than interpreted.** `2/1/24` could be
   2024 or 1924, and the sample data gives no basis for choosing.
-- **Rules with overlapping time windows are not flagged.** The sample data
-  contains rows that apply to the same issuer over overlapping dates and set
-  the same column to different values. Whether that is a conflict depends on
-  semantics the assignment does not state — an issuer legitimately having two
-  countries or two analysts is not a contradiction — so the tool reports the
-  diff and leaves interpretation to the reader.
 
 ## Layout
 
@@ -202,17 +197,16 @@ pip install pytest
 python -m pytest
 ```
 
-100 tests. `tests/test_sample_patches.py` asserts end-to-end expectations for
-the provided sample progression; the other modules cover parsing, validation,
-columns, matching, field classification and rendering.
+`tests/test_sample_patches.py` asserts end-to-end expectations for the provided
+sample progression; the other modules cover parsing, validation, columns,
+matching, field classification and rendering.
 
-## LLM Use/Points of Disagreement
+#### LLM Use Disclaimer/Points of Disagreement
 
-I utilized AI assistance in implementing this program and especially with writing the test suite. However I want to make it clear that I very much thought through and weighed the options on every detail of the design, implementation, and output format.
+I utilized AI assistance in implementing this program and especially with writing the test suite.  I reviewed every resulting change and treated suggestions as proposals rather than requirements. Some examples of decisions where I rejected or simplified the proposed design based on the assignment and supplied data:
 
-Specific decisions where I disagreed with the LLM's decisions and manually overrode:
 - Rejected using (keyColumn, beginDate, endDate) as composite key in favor of single keyColumn and a set of rules to match rows across patches. I made this decision because I noticed in the sample patches there can be multiple rows with same key column and begin/end dates.
-- In models.py, the LLM implementation originally set the Patch.rows and RowModification.field_changes field types as tuples instead of lists. I assume this was in order to make these dataclasses hashable. I decided to change them to lists because IMO this data just makes more sense in list form, and we never hash Patch or RowModification objects anyway.
-- Also in models.py, the LLM implementation originally created separate dataclasses for RowAddition and RowRemoval. I removed them because they were just wrappers over PatchRow; there wasn't any point to them and they just bloated the code.
 - The LLM implementation originally included a Warnings section at the bottom of the output diff, displaying a warning when two rows had the same key but overlapping begin/end dates. I removed this feature because 1. I felt it made too many assumptions about the underlying patch system, and 2. having 2 rows with the same date range makes sense to me if they have different Country or Analyst or whatever.
 - In the matching logic, the LLM implementation originally suggested a "threshold" value (originally half) where if more than this number of value fields differ between an old and a new row, then we would never count it as a modification and instead always count it as deleted row + added row. I decided against this because I felt it introduced unnecessary complexity, and any threshold value would have been arbitrary.
+- In models.py, I changed Patch.rows and RowModification.field_changes types from tuples to lists. These collections are ordered results that are never hashed, so tuple immutability did not provide a useful invariant. 
+- Also in models.py, removed separate dataclasses for RowAddition and RowRemoval. I felt they were unnecessary and bloated the code since they were basically just wrapper classes over PatchRow.
