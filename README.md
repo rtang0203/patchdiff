@@ -57,6 +57,7 @@ Removed rows
 | `patchdiff/cli.py` | Argument parsing and exit codes |
 | `docs/DIFF_SPEC.md` | Precise statement of every rule the diff follows |
 
+
 The file arrangement is designed for modularity. differ.py produces a PatchDiff object, which could easily be rendered into a JSON/YAML/other machine readable format by a different renderer.
 ---
 
