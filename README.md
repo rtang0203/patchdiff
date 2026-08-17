@@ -4,7 +4,8 @@ Generates a human-readable diff between two patch CSVs, describing how the
 application of the patch changes.
 
 The central model is:
- ▏ A patch row is a rule: for key K, during time scope S, set fields V.
+
+*A patch row is a rule: for key K, during time scope S, set fields V.*
 
  Therefore it compares patch semantics rather than CSV text:
 
