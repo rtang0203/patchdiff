@@ -1,12 +1,11 @@
-"""Turning a PatchDiff into text a person can read.
+"""Formatting a PatchDiff as text. Computes nothing.
 
-This module never computes a difference; it only formats one.
-
-The diff is written in the language of the patch rather than the language of
-the file. Rows are identified by key and time window, not by position, and a
-blank value column reads as "leaves this alone" rather than as an empty
-string -- because that is what a blank value column means.
+The diff is written in the language of the patch, not of the file: rows are
+identified by key and time window, and a blank value column reads as "leaves
+this alone" rather than as an empty string, because that is what it means.
 """
+
+from .model import sort_key
 
 MAX_ENTRIES = 20
 
@@ -15,20 +14,14 @@ def render(diff) -> str:
     if not diff.has_differences:
         return "No differences.\n"
 
-    blocks = [_summary(diff)]
-    blocks += [b for b in (
-        _column_section(diff),
-        _modified_section(diff),
-        _added_section(diff),
-        _removed_section(diff),
-        _warning_section(diff),
-    ) if b]
-    return "\n\n".join(blocks) + "\n"
+    blocks = [_summary(diff), _columns(diff), _modified(diff)]
+    for rows, title, marker, verb in (
+        (diff.rows_added, "Added rows", "+", "Sets"),
+        (diff.rows_removed, "Removed rows", "-", "Was setting"),
+    ):
+        blocks.append(_rows(rows, title, marker, verb))
+    return "\n\n".join(b for b in blocks if b) + "\n"
 
-
-# ---------------------------------------------------------------------------
-# Summary
-# ---------------------------------------------------------------------------
 
 def _summary(diff) -> str:
     counts = [
@@ -38,139 +31,82 @@ def _summary(diff) -> str:
         (len(diff.rows_added), "row", "added"),
         (len(diff.rows_removed), "row", "removed"),
     ]
-    parts = [f"{n} {_plural(noun, n)} {verb}" for n, noun, verb in counts if n]
+    parts = [f"{n} {noun if n == 1 else noun + 's'} {verb}"
+             for n, noun, verb in counts if n]
     if diff.rows_unchanged:
         parts.append(f"{len(diff.rows_unchanged)} unchanged")
     return "Summary: " + ", ".join(parts)
 
 
-def _plural(noun, n):
-    return noun if n == 1 else noun + "s"
-
-
-# ---------------------------------------------------------------------------
-# Columns
-# ---------------------------------------------------------------------------
-
-def _column_section(diff) -> str:
+def _columns(diff) -> str:
+    """A column change is reported once here, never as a per-row change: a
+    column added across 200 rows is one change, not 200."""
     if not (diff.columns_added or diff.columns_removed):
         return ""
-
     lines = ["Column changes"]
     for column in diff.columns_added:
-        lines.append(f"  + {column}")
-        lines += _usage_lines(diff.added_column_usage.get(column, ()), column,
-                              "Sets", "No rows populate it")
+        lines += [f"  + {column}"] + _usage(diff.new, column, "Sets")
     for column in diff.columns_removed:
-        lines.append(f"  - {column}")
-        lines += _usage_lines(diff.removed_column_usage.get(column, ()), column,
-                              "No longer sets", "No rows populated it")
+        lines += [f"  - {column}"] + _usage(diff.old, column, "No longer sets")
     return "\n".join(lines)
 
 
-def _usage_lines(rows, column, verb, empty_note):
-    """A column change is reported once here, never as a per-row change -- a
-    column added across 200 rows is one change, not 200."""
+def _usage(patch, column, verb) -> list:
+    rows = [r for r in sorted(patch.rows, key=sort_key) if r.values.get(column)]
     if not rows:
-        return [f"      {empty_note}, so this does not change how the patch applies"]
-    shown = rows[:MAX_ENTRIES]
-    lines = [f"      {verb} {column} to {r.values[column]} for {_row_label(r)}"
-             for r in shown]
-    if len(rows) > len(shown):
-        lines.append(f"      ... and {len(rows) - len(shown)} more")
-    return lines
+        return ["      Blank in every row, so this does not change how the "
+                "patch applies"]
+    return [f"      {verb} {column} to {r.values[column]} for {_label(r)}"
+            for r in rows[:MAX_ENTRIES]] + _more(len(rows))
 
 
-# ---------------------------------------------------------------------------
-# Rows
-# ---------------------------------------------------------------------------
-
-def _modified_section(diff) -> str:
+def _modified(diff) -> str:
     if not diff.rows_modified:
         return ""
     lines = ["Modified rows"]
-    for mod in _truncate(diff.rows_modified, lines):
-        header = f"  ~ {_row_label(mod.new_row)}"
+    for mod in diff.rows_modified[:MAX_ENTRIES]:
+        header = f"  ~ {_label(mod.new_row)}"
         if mod.scope_changed:
             header += f", was {mod.old_row.scope.describe()}"
-        header += f"  ({_line_ref(mod.old_row, mod.new_row)})"
-        lines.append(header)
-        lines += [f"      {_describe_change(c)}" for c in mod.field_changes]
-    return "\n".join(lines)
+        lines.append(f"{header}  ({_lines(mod.old_row, mod.new_row)})")
+        lines += [f"      {_change(c)}" for c in mod.field_changes]
+    return "\n".join(lines + _more(len(diff.rows_modified)))
 
 
-def _added_section(diff) -> str:
-    return _row_block(diff.rows_added, "Added rows", "+", "Sets")
-
-
-def _removed_section(diff) -> str:
-    return _row_block(diff.rows_removed, "Removed rows", "-", "Was setting")
-
-
-def _row_block(entries, title, marker, verb) -> str:
-    if not entries:
+def _rows(rows, title, marker, verb) -> str:
+    if not rows:
         return ""
     lines = [title]
-    for entry in _truncate(entries, lines):
-        row = entry.row
-        lines.append(f"  {marker} {_row_label(row)}  ({_line_ref(row)})")
+    for row in rows[:MAX_ENTRIES]:
+        lines.append(f"  {marker} {_label(row)}  (line {row.line_number})")
         # Only populated columns: a row that sets two fields and leaves five
         # blank is setting two things.
-        for column, value in row.populated.items():
-            lines.append(f"      {verb} {column} to {value}")
-    return "\n".join(lines)
+        lines += [f"      {verb} {c} to {v}" for c, v in row.populated.items()]
+    return "\n".join(lines + _more(len(rows)))
 
 
-def _describe_change(change) -> str:
+def _change(change) -> str:
     if change.kind == "set":
         return (f"Now sets {change.column} to {change.new_value} "
-                f"(previously left unchanged)")
+                f"(previously not set)")
     if change.kind == "cleared":
-        # The most consequential edit a user can make: the patch has silently
-        # stopped touching a field.
-        return (f"No longer changes {change.column} "
+        # The most consequential edit a reviewer can miss: the patch has
+        # silently stopped touching a field.
+        return (f"No longer sets {change.column} "
                 f"(previously set to {change.old_value})")
     return (f"Changes {change.column} from {change.old_value} "
             f"to {change.new_value}")
 
 
-# ---------------------------------------------------------------------------
-# Warnings
-# ---------------------------------------------------------------------------
-
-def _warning_section(diff) -> str:
-    if not diff.warnings:
-        return ""
-    lines = ["Warnings"]
-    for w in diff.warnings:
-        where = ", ".join(str(n) for n in w.line_numbers)
-        cols = ", ".join(w.columns)
-        lines.append(
-            f"  ! {diff.key_column} {w.key}: rows at lines {where} overlap in "
-            f"time and disagree on {cols}. Which value wins depends on the "
-            f"order the system applies rows in."
-        )
-    return "\n".join(lines)
+def _label(row) -> str:
+    return f"{row.key} \u2014 {row.scope.describe()}"
 
 
-# ---------------------------------------------------------------------------
-# Shared bits
-# ---------------------------------------------------------------------------
-
-def _row_label(row) -> str:
-    return f"{row.key} — {row.scope.describe()}"
+def _lines(old_row, new_row) -> str:
+    a, b = old_row.line_number, new_row.line_number
+    return f"line {a}" if a == b else f"line {a} -> {b}"
 
 
-def _line_ref(*rows) -> str:
-    """Old line then new line, in that order -- direction is the useful part."""
-    numbers = list(dict.fromkeys(r.line_number for r in rows))
-    if len(numbers) == 1:
-        return f"line {numbers[0]}"
-    return "lines " + " -> ".join(str(n) for n in numbers)
-
-
-def _truncate(entries, lines):
-    """Show at most MAX_ENTRIES; the summary still reports the true total."""
-    if len(entries) > MAX_ENTRIES:
-        lines.append(f"  ... and {len(entries) - MAX_ENTRIES} more")
-    return entries[:MAX_ENTRIES]
+def _more(total) -> list:
+    """The section truncates; the summary still reports the true total."""
+    return [f"      ... and {total - MAX_ENTRIES} more"] if total > MAX_ENTRIES else []

@@ -6,3 +6,5 @@ htmlcov/
 .venv/
 venv/
 .DS_Store
+MEMORY.md
+docs/Senior data engineer code test.docx

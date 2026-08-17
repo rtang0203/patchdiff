@@ -21,11 +21,10 @@ through the helpers here rather than importing the package directly.
     diff_patches(old: Patch, new: Patch) -> PatchDiff
         .columns_added   list[str]
         .columns_removed list[str]
-        .rows_added      list[RowAddition]      .row
-        .rows_removed    list[RowRemoval]       .row
+        .rows_added      list[PatchRow]
+        .rows_removed    list[PatchRow]
         .rows_modified   list[RowModification]
-        .rows_unchanged  list[RowMatch]         .old_row, .new_row
-        .warnings        list[OverlapWarning]   .key, .columns, .line_numbers
+        .rows_unchanged  list[(old_row, new_row)]
         .has_differences bool
 
     RowModification
@@ -92,8 +91,8 @@ def sample_diff(a, b):
 
 
 def keys(entries):
-    """Sorted key values from a list of additions/removals/modifications."""
-    return sorted(e.row.key if hasattr(e, "row") else e.key for e in entries)
+    """Sorted key values from additions, removals or modifications."""
+    return sorted(e.key for e in entries)
 
 
 def changes_by_column(modification):

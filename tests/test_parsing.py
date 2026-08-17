@@ -20,7 +20,7 @@ def test_key_column_is_first_non_date_column(tmp_path):
         ,,JBL,USA
     """))
     assert p.key_column == "Issuer"
-    assert set(p.value_columns) == {"Country"}
+    assert p.value_columns == ["Country"]
 
 
 def test_key_column_found_when_dates_are_not_leading(tmp_path):
@@ -66,7 +66,7 @@ def test_compact_date_format_parsed(tmp_path):
 
 
 def test_date_formats_are_equivalent(tmp_path):
-    """Same date written four ways is not a change."""
+    """Equivalent accepted date formats do not produce a change."""
     old = """
         BeginDate,EndDate,Issuer,Country
         20240201,20241231,FR,FRA
@@ -135,18 +135,3 @@ def test_all_blank_row_is_skipped(tmp_path):
     assert len(p.rows) == 1
 
 
-def test_trailing_empty_columns_are_dropped(tmp_path):
-    """Excel exports sometimes carry unnamed trailing columns. Two of them would
-    otherwise trip the duplicate-column-name error on a valid file."""
-    p = load_patch(write_raw(
-        tmp_path, "p.csv",
-        "BeginDate,EndDate,Issuer,Country,,\n,,JBL,USA,,\n"))
-    assert set(p.value_columns) == {"Country"}
-
-
-def test_trailing_column_with_data_is_kept(tmp_path):
-    """Only drop trailing columns blank in the header AND every row."""
-    p = load_patch(write_raw(
-        tmp_path, "p.csv",
-        "BeginDate,EndDate,Issuer,Country,Sector\n,,JBL,USA,Computers\n"))
-    assert set(p.value_columns) == {"Country", "Sector"}

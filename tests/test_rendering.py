@@ -16,8 +16,6 @@ from conftest import FIXTURES, diff_text, render, sample_diff
 # Determinism and ordering
 # --------------------------------------------------------------------------
 
-def test_output_is_deterministic_across_runs():
-    assert render(sample_diff(3, 4)) == render(sample_diff(3, 4))
 
 
 def test_output_is_independent_of_input_row_order(tmp_path):
@@ -93,7 +91,20 @@ def test_dates_render_canonically_not_as_written():
     assert "20240201" not in out
 
 
-def test_cleared_field_does_not_render_as_empty_quotes(tmp_path):
+def test_newly_populated_field_renders_as_now_set(tmp_path):
+    old = """
+        BeginDate,EndDate,Issuer,Analyst
+        ,,TSLA,
+    """
+    new = """
+        BeginDate,EndDate,Issuer,Analyst
+        ,,TSLA,Bob
+    """
+    out = render(diff_text(tmp_path, old, new))
+    assert "Now sets Analyst to Bob (previously not set)" in out
+
+
+def test_cleared_field_renders_as_no_longer_set(tmp_path):
     old = """
         BeginDate,EndDate,Issuer,Analyst
         ,,TSLA,Bob
@@ -103,8 +114,7 @@ def test_cleared_field_does_not_render_as_empty_quotes(tmp_path):
         ,,TSLA,
     """
     out = render(diff_text(tmp_path, old, new))
-    assert 'to ""' not in out
-    assert re.search(r"no longer changes", out, re.I)
+    assert "No longer sets Analyst (previously set to Bob)" in out
 
 
 def test_scope_change_is_visible_in_output(tmp_path):

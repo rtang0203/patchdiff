@@ -124,7 +124,7 @@ def test_end_date_change_is_a_modification_not_delete_plus_add(tmp_path):
     assert diff.rows_removed == []
     m = find_modification(diff, "AMT")
     assert m.scope_changed is True
-    assert m.field_changes == ()
+    assert m.field_changes == []
     assert m.old_row.scope.end == dt.date(2024, 1, 31)
     assert m.new_row.scope.end == dt.date(2024, 2, 29)
 
@@ -212,7 +212,7 @@ def test_extra_row_in_group_with_exact_match_is_an_addition(tmp_path):
     diff = diff_text(tmp_path, old, new)
     assert diff.rows_modified == []
     assert len(diff.rows_added) == 1
-    assert diff.rows_added[0].row.values["Conviction"] == "High"
+    assert diff.rows_added[0].values["Conviction"] == "High"
 
 
 # --------------------------------------------------------------------------
@@ -237,7 +237,7 @@ def test_greedy_picks_the_closest_candidate(tmp_path):
         "Sector": ("", "Consumer Discretionary", "set")
     }
     assert len(diff.rows_removed) == 1
-    assert diff.rows_removed[0].row.values["Country"] == "FRA"
+    assert diff.rows_removed[0].values["Country"] == "FRA"
 
 
 def test_greedy_is_stable_regardless_of_input_row_order(tmp_path):
@@ -260,7 +260,7 @@ def test_greedy_is_stable_regardless_of_input_row_order(tmp_path):
     b = diff_text(tmp_path, old_b, new)
     assert changes_by_column(find_modification(a, "PIPR")) == \
            changes_by_column(find_modification(b, "PIPR"))
-    assert a.rows_removed[0].row.values == b.rows_removed[0].row.values
+    assert a.rows_removed[0].values == b.rows_removed[0].values
 
 
 def test_tie_broken_by_line_number(tmp_path):
@@ -279,7 +279,7 @@ def test_tie_broken_by_line_number(tmp_path):
     m = find_modification(diff, "PIPR")
     assert m.old_row.line_number == 2
     assert changes_by_column(m) == {"Country": ("FRA", "USA", "changed")}
-    assert diff.rows_removed[0].row.values["Country"] == "ITA"
+    assert diff.rows_removed[0].values["Country"] == "ITA"
 
 
 def test_many_to_many_group(tmp_path):

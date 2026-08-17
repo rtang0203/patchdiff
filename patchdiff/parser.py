@@ -1,8 +1,8 @@
 """Reading patch CSVs into the model.
 
-Everything that makes two byte-different files mean the same thing is
-normalized here: BOM, whitespace, date format, blank lines, trailing empty
-columns. After this layer, comparison can be naive.
+Normalizes what can differ between two files describing the same patch --
+BOM, whitespace, date format -- and errors on anything else it cannot
+interpret, rather than guessing. After this layer, comparison is naive.
 """
 
 import csv
@@ -11,36 +11,30 @@ from datetime import datetime
 from .model import WELL_KNOWN_COLUMNS, Patch, PatchError, PatchRow, Scope
 
 # Tried in order. The sample patches use YYYYMMDD; the assignment's prose
-# examples use M/D/YYYY.
-DATE_FORMATS = ("%Y%m%d", "%m/%d/%Y", "%Y-%m-%d", "%m/%d/%y")
+# examples use M/D/YYYY. Two-digit years are ambiguous and rejected.
+DATE_FORMATS = ("%Y%m%d", "%m/%d/%Y", "%Y-%m-%d")
 
 
 def load_patch(path) -> Patch:
     """Parse a patch CSV. Raises PatchError on anything malformed."""
-    header, data_rows = _read_rows(path)
-    header, data_rows = _drop_trailing_empty_columns(header, data_rows)
+    header, records = _read(path)
     _validate_header(header, path)
-
-    key_column, value_columns = _classify_columns(header)
+    key_column, value_columns = _classify(header, path)
     index = {name: i for i, name in enumerate(header)}
-
-    rows = tuple(
-        _build_row(cells, line_no, index, key_column, value_columns, path)
-        for line_no, cells in data_rows
+    return Patch(
+        key_column=key_column,
+        value_columns=value_columns,
+        rows=[_build_row(cells, n, index, key_column, value_columns, path)
+              for n, cells in records],
     )
-    return Patch(key_column=key_column, value_columns=value_columns, rows=rows)
 
 
-# ---------------------------------------------------------------------------
-# Reading
-# ---------------------------------------------------------------------------
+def _read(path):
+    """Return (header, [(line_number, cells)]) with every cell stripped.
 
-def _read_rows(path):
-    """Return (header, [(line_number, cells), ...]) with everything stripped.
-
-    utf-8-sig matters: Excel writes CSVs with a BOM, and without stripping it
-    the first header becomes '\\ufeffBeginDate', which makes every column look
-    removed and re-added on two otherwise identical files.
+    utf-8-sig matters: Excel writes a BOM, and without stripping it the first
+    header becomes '\\ufeffBeginDate', so two identical files report every
+    column as removed and re-added.
     """
     try:
         with open(path, newline="", encoding="utf-8-sig") as fh:
@@ -50,58 +44,38 @@ def _read_rows(path):
     except OSError as exc:
         raise PatchError(f"cannot read {path}: {exc}") from exc
 
-    # Drop wholly-empty records. A trailing newline yields [] from csv.reader
-    # and would otherwise trip the blank-key check on a valid file.
+    # Wholly-empty records are dropped: csv.reader yields [] for the trailing
+    # newline that essentially every CSV ends with.
     records = [(n, cells) for n, cells in records if any(cells)]
     if not records:
         raise PatchError(f"{path} is empty")
 
-    header = records[0][1]
-    # Pad short rows so column indexing is total. Extra cells beyond the header
-    # are dropped; a row longer than the header is malformed Excel output and
-    # the extra values have no column to belong to.
-    data = [(n, (cells + [""] * len(header))[:len(header)])
-            for n, cells in records[1:]]
-    return header, data
+    header, rows = records[0][1], records[1:]
+    for n, cells in rows:
+        if len(cells) != len(header):
+            raise PatchError(f"{path} line {n}: expected {len(header)} columns, "
+                             f"found {len(cells)}")
+    return header, rows
 
-
-def _drop_trailing_empty_columns(header, data_rows):
-    """Excel exports sometimes carry unnamed trailing columns. Two of them
-    would trip the duplicate-name check on a perfectly valid file."""
-    width = len(header)
-    while width and not header[width - 1] and all(
-        not cells[width - 1] for _, cells in data_rows
-    ):
-        width -= 1
-    return header[:width], [(n, cells[:width]) for n, cells in data_rows]
-
-
-# ---------------------------------------------------------------------------
-# Validation and classification
-# ---------------------------------------------------------------------------
 
 def _validate_header(header, path):
     if len(header) < 3:
-        raise PatchError(
-            f"{path}: expected at least BeginDate, EndDate and a key column, "
-            f"found {header}"
-        )
-    seen = set()
-    for name in header:
-        if name in seen:
-            raise PatchError(f"{path}: duplicate column {name!r}")
-        seen.add(name)
+        raise PatchError(f"{path}: expected BeginDate, EndDate and a key "
+                         f"column, found {header}")
+    if not all(header):
+        raise PatchError(f"{path}: blank column name in header {header}")
+    duplicates = sorted({c for c in header if header.count(c) > 1})
+    if duplicates:
+        raise PatchError(f"{path}: duplicate column name(s) {duplicates}")
 
 
-def _classify_columns(header):
+def _classify(header, path):
     """Key column is the first column that is not BeginDate/EndDate.
 
-    Positional, as the assignment specifies — which is why reordering columns
-    so a different column lands first is an error rather than a no-op. See
-    DIFF_SPEC section 2.
+    Positional, as the assignment specifies -- which is why reordering columns
+    so a different one lands first is an error rather than a no-op.
     """
-    key_column = None
-    value_columns = []
+    key_column, value_columns = None, []
     for name in header:
         if name in WELL_KNOWN_COLUMNS:
             continue
@@ -110,21 +84,18 @@ def _classify_columns(header):
         else:
             value_columns.append(name)
     if key_column is None:
-        raise PatchError("no key column: every column is BeginDate/EndDate")
-    return key_column, tuple(value_columns)
+        raise PatchError(f"{path}: no key column; every column is a date column")
+    return key_column, value_columns
 
 
 def _build_row(cells, line_no, index, key_column, value_columns, path):
     key = cells[index[key_column]]
     if not key:
         raise PatchError(f"{path} line {line_no}: blank {key_column}")
-
-    scope = Scope(
-        begin=_parse_date(cells, index, "BeginDate", line_no, path),
-        end=_parse_date(cells, index, "EndDate", line_no, path),
-    )
-    values = {c: cells[index[c]] for c in value_columns}
-    return PatchRow(key=key, scope=scope, values=values, line_number=line_no)
+    scope = Scope(begin=_parse_date(cells, index, "BeginDate", line_no, path),
+                  end=_parse_date(cells, index, "EndDate", line_no, path))
+    return PatchRow(key=key, scope=scope, line_number=line_no,
+                    values={c: cells[index[c]] for c in value_columns})
 
 
 def _parse_date(cells, index, column, line_no, path):

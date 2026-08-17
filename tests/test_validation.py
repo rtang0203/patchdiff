@@ -87,7 +87,7 @@ def test_header_only_file_is_valid_and_empty(tmp_path):
     p = load_patch(write_csv(tmp_path, "p.csv", """
         BeginDate,EndDate,Issuer,Country
     """))
-    assert p.rows == ()
+    assert p.rows == []
 
 
 def test_two_header_only_files_have_no_diff(tmp_path):
@@ -95,3 +95,30 @@ def test_two_header_only_files_have_no_diff(tmp_path):
     old = load_patch(write_raw(tmp_path, "old.csv", header))
     new = load_patch(write_raw(tmp_path, "new.csv", header))
     assert diff_patches(old, new).has_differences is False
+
+
+def test_blank_column_name_errors(tmp_path):
+    """Excel sometimes emits unnamed trailing columns. Rejected rather than
+    repaired: a column with no name has no meaning in a patch."""
+    with pytest.raises(PatchError):
+        load_patch(write_raw(
+            tmp_path, "p.csv",
+            "BeginDate,EndDate,Issuer,Country,,\n,,JBL,USA,,\n"))
+
+
+def test_ragged_row_errors(tmp_path):
+    """A row with the wrong number of cells has values with no column to
+    belong to. Rejected rather than padded or truncated."""
+    with pytest.raises(PatchError):
+        load_patch(write_raw(
+            tmp_path, "p.csv",
+            "BeginDate,EndDate,Issuer,Country\n,,JBL\n"))
+
+
+def test_two_digit_year_errors(tmp_path):
+    """Ambiguous: 2/1/24 could be 2024 or 1924."""
+    with pytest.raises(PatchError):
+        load_patch(write_csv(tmp_path, "p.csv", """
+            BeginDate,EndDate,Issuer,Country
+            2/1/24,,JBL,USA
+        """))

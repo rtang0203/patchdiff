@@ -28,7 +28,7 @@ def test_0_to_1_adds_two_rows():
 
 def test_0_to_1_added_fr_row_is_date_scoped():
     diff = sample_diff(0, 1)
-    fr = next(a.row for a in diff.rows_added if a.row.key == "FR")
+    fr = next(row for row in diff.rows_added if row.key == "FR")
     assert fr.scope.begin == dt.date(2024, 2, 1)
     assert fr.scope.end is None
     assert {k: v for k, v in fr.values.items() if v} == {
@@ -40,7 +40,7 @@ def test_0_to_1_added_pipr_row_joins_an_existing_key():
     """PIPR already had an all-time row that matches exactly. The second row is
     an addition, not a modification of the first."""
     diff = sample_diff(0, 1)
-    pipr = next(a.row for a in diff.rows_added if a.row.key == "PIPR")
+    pipr = next(row for row in diff.rows_added if row.key == "PIPR")
     assert pipr.scope.begin is None
     assert {k: v for k, v in pipr.values.items() if v} == {
         "Country": "USA", "Conviction": "High",
@@ -88,7 +88,7 @@ def test_2_to_3_reports_only_the_ibm_addition():
     assert keys(diff.rows_added) == ["IBM"]
     assert diff.rows_modified == []
     assert diff.rows_removed == []
-    ibm = diff.rows_added[0].row
+    ibm = diff.rows_added[0]
     assert ibm.scope.begin == dt.date(2024, 3, 1)
     assert {k: v for k, v in ibm.values.items() if v} == {"Conviction": "Low"}
 
@@ -108,7 +108,7 @@ def test_3_to_4_pipr_group_collapses_to_one_modification_and_one_removal():
     assert changes_by_column(m) == {
         "Sector": ("", "Consumer Discretionary", "set")
     }
-    removed = [r.row for r in diff.rows_removed if r.row.key == "PIPR"]
+    removed = [row for row in diff.rows_removed if row.key == "PIPR"]
     assert len(removed) == 1
     assert removed[0].values["Country"] == "FRA"
     assert removed[0].values["Sector"] == "Consumer Discretionary"
@@ -133,7 +133,7 @@ def test_3_to_4_totals():
 
 def test_3_to_4_jbl_and_ibm_untouched():
     diff = sample_diff(3, 4)
-    unchanged = sorted(u.new_row.key for u in diff.rows_unchanged)
+    unchanged = sorted(new_row.key for _, new_row in diff.rows_unchanged)
     assert unchanged == ["FR", "IBM", "JBL"]
 
 
@@ -172,30 +172,3 @@ def test_reverse_diff_mirrors_counts(a, b):
     assert fwd.columns_added == rev.columns_removed
 
 
-# --------------------------------------------------------------------------
-# Overlap warnings
-# --------------------------------------------------------------------------
-
-def test_patch1_warns_on_conflicting_pipr_rows():
-    """Two all-time PIPR rows both set Country, to FRA and USA. The patch is
-    self-conflicting and the assignment gives no precedence rule."""
-    diff = sample_diff(0, 1)
-    pipr = [w for w in diff.warnings if w.key == "PIPR"]
-    assert len(pipr) == 1
-    assert "Country" in pipr[0].columns
-
-
-def test_patch1_warns_on_overlapping_fr_scopes():
-    """FR's all-time row and its from-2024-02-01 row overlap and both set
-    Country. Overlap detection is not limited to identical scopes."""
-    diff = sample_diff(0, 1)
-    fr = [w for w in diff.warnings if w.key == "FR"]
-    assert len(fr) == 1
-    assert "Country" in fr[0].columns
-
-
-def test_no_warning_when_overlapping_rows_touch_different_columns():
-    """Overlap alone is not a conflict — the rows must contend for the same
-    column. Patch4's PIPR is a single row, so only FR should warn."""
-    diff = sample_diff(3, 4)
-    assert sorted(w.key for w in diff.warnings) == ["FR"]

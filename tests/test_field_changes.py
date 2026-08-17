@@ -104,6 +104,6 @@ def test_added_and_removed_rows_list_only_populated_columns(tmp_path):
         20240301,,IBM,,Low,
     """
     diff = diff_text(tmp_path, old, new)
-    added = diff.rows_added[0].row
+    added = diff.rows_added[0]
     populated = {k: v for k, v in added.values.items() if v}
     assert populated == {"Conviction": "Low"}

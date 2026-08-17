@@ -31,14 +31,15 @@ Applied to both files before anything is compared.
 2. `strip()` every header name and every cell value.
 3. Skip rows that are wholly empty (the `csv` module yields `[]` or all-blank
    lists for stray trailing newlines).
-4. Drop trailing columns whose header is blank **and** whose value is blank in
-   every data row. Excel exports sometimes carry these.
-5. Record the original 1-based file line number on every row. This is metadata:
+4. Record the original 1-based file line number on every row. This is metadata:
    it is used for output and for deterministic tie-breaking, and is **never**
    part of an equality comparison.
-6. Parse dates. Accepted input formats, tried in order:
-   `%Y%m%d`, `%m/%d/%Y`, `%Y-%m-%d`, `%m/%d/%y`.
-   A blank date stays `None`. An unparseable non-blank date is an error.
+5. Parse dates. Accepted input formats, tried in order:
+   `%Y%m%d`, `%m/%d/%Y`, `%Y-%m-%d`. A blank date stays `None`.
+
+Anything else the file might contain is **rejected rather than repaired** — see
+section 2. Guessing at malformed input hides real problems and adds code that
+earns nothing.
 
 Two files that differ only in BOM, whitespace, date format, row order, or
 column order produce **no diff**.
@@ -52,9 +53,11 @@ Errors abort with a message and a non-zero exit code.
 | Condition | Result |
 | --- | --- |
 | Duplicate column names (after strip) in either file | **Error** |
+| A blank column name (Excel emits unnamed trailing columns) | **Error** |
+| A row with more or fewer cells than the header | **Error** |
 | Key column name differs between the two files | **Error** |
 | A row has a blank key cell | **Error** |
-| A non-blank date cell cannot be parsed | **Error** |
+| A non-blank date cell cannot be parsed, including two-digit years | **Error** |
 | Fewer than 3 columns (no room for dates + key) | **Error** |
 | `BeginDate`/`EndDate` absent | Not validated — out of scope |
 
@@ -149,8 +152,8 @@ Only shared value columns are examined. Unchanged fields are not reported.
 
 | Old | New | Reported as |
 | --- | --- | --- |
-| blank | `V` | `Now sets {col} to {V} (previously left unchanged)` |
-| `V` | blank | `No longer changes {col} (previously set to {V})` |
+| blank | `V` | `Now sets {col} to {V} (previously not set)` |
+| `V` | blank | `No longer sets {col} (previously set to {V})` |
 | `A` | `B` | `Changes {col} from {A} to {B}` |
 
 The blank cases carry the domain meaning — a blank value column means "leave the
@@ -202,7 +205,6 @@ Column changes
 Modified rows
 Added rows
 Removed rows
-Warnings
 ```
 
 Summary leads because users skim the first line to decide whether the change is
@@ -218,25 +220,7 @@ Sections with nothing in them are omitted. Long sections truncate at 20 with
 
 ---
 
-## 9. Warnings (non-fatal)
-
-Emitted after the diff, for the **new** patch only.
-
-**Overlapping scopes.** Two rows sharing a key, whose date ranges overlap, that
-both populate the same value column. The patch is self-conflicting and its
-result depends on a precedence rule the assignment never specifies. Example from
-the sample data:
-
-```
-FR: rows at lines 3 and 4 overlap from 2024-02-01 and both set Country
-    (USA, FRA)
-```
-
-The conflict is surfaced, not resolved.
-
----
-
-## 10. Exit codes
+## 9. Exit codes
 
 | Code | Meaning |
 | --- | --- |
@@ -248,7 +232,7 @@ Mirrors `diff(1)`, so the tool composes in a shell pipeline.
 
 ---
 
-## 11. Worked examples from the sample patches
+## 10. Worked examples from the sample patches
 
 **Patch0 → Patch1.** Two rows added, nothing else. Both new rows land in groups
 that already had an exact match, so they fall to Stage 5 as additions.
