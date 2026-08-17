@@ -46,7 +46,7 @@ Removed rows
       Was setting Country to FRA
 ```
 
-### My Thought Process/Editorial:
+# My Thought Process/Editorial:
 
 I started with the idea of a standard git style line number based diff. Display a summary:
 ```
